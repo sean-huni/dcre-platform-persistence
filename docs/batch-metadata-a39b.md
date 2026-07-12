@@ -1,0 +1,1 @@
+A-39b placeholder: verify Spring Batch 6 schema DDL, copy to Liquibase with EXIT_MESSAGE widened to STRING, parameterised table prefix. Blocks nothing in M2 (separate metadata DBs + initialize-schema).
