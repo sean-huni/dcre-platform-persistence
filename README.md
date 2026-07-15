@@ -1,80 +1,97 @@
 # dcre-platform-persistence
 
-Persistence conventions for DCRE services (R-04/R-21/R-34):
-- Liquibase XML changelogs, calendar layout (YYYY/MM), single writer per table via grants.
-- v4 UUID PKs; wire codes persisted as text under CHECK constraints, never enum identity.
-- Batch metadata: per-service DATABASE (e.g. crr_meta) on the shared cluster,
-  `spring.batch.jdbc.initialize-schema=always` for M2 (SYNTHETIC-CONTRACT seam);
-  the Liquibase-owned copy with widened EXIT_MESSAGE lands with A-39b once the
-  Batch 6 DDL surface is verified.
-- CRDB gotchas: no make_interval named args (use INTERVAL literals); 40001
-  serialization retries expected under contention.
+Shared persistence platform library for the DCRE Collections fleet: `BaseEntity` plus the Spring Data JDBC `JdbcConfig` every Spring Boot stage service imports for CockroachDB persistence.
 
-## Publishing (how this module is made available for reuse)
+## What it does
 
-This module is published as a Maven artifact via the Gradle `maven-publish` plugin
-(see `build.gradle`) so other DCRE services can import it as a normal dependency.
+Provides the persistence base shared by all DCRE stage services. `BaseEntity` gives every aggregate a client-assigned v4 UUID primary key, an optimistic-locking `@Version` and `created_at`/`updated_at` audit timestamps (`Instant`). `JdbcConfig` wires `@EnableJdbcAuditing` plus a `BeforeConvertCallback<BaseEntity>` that assigns the UUID before the first INSERT, because Spring Data JDBC includes the id in INSERTs and bypasses DB defaults. Published as `za.co.fnb.dcre:platform-persistence:0.1.0` to Maven Local and consumed as a normal Gradle dependency.
 
-Coordinates:
+## Architecture and principles
 
+- SOLID, single responsibility per class: `BaseEntity` owns aggregate identity and audit state; `JdbcConfig` owns wiring (auditing plus the id-assignment callback). Two small units with a clear interface: extend one, `@Import` the other.
+- Layer-first packages: in consuming services entities live in `data/model` and extend `BaseEntity`; repositories live in `data/repo`. This library sits beneath that layer and imports only `org.springframework.data.*`.
+- 12FactorApp Alignment - https://12factor.net/: dependencies explicitly declared (`spring-boot-starter-data-jdbc` is `compileOnly`, the consuming service owns the runtime); the library holds zero configuration, config stays strictly in the consuming service's environment; one artifact version fleet-wide keeps dev/prod parity.
+- Idempotent restart semantics: `assignIdIfMissing()` is a no-op once an id exists (unit-tested), so re-converted aggregates keep their identity. Client-assigned UUID PKs pair with the fleet rule that CockroachDB `UPSERT` arbitrates on the primary key only, so idempotent writes use `INSERT ... ON CONFLICT (business key)`.
+
+### Fleet persistence conventions carried by this repo (design register R-04, R-21, R-34)
+
+- Liquibase pure-XML typed changelogs in calendar layout (`YYYY/MM`); single writer per table via grants.
+- v4 UUID PKs; wire/status codes persisted as text under CHECK constraints, never enum identity.
+- Batch metadata: per-service database (e.g. `crr_meta`) on the shared cluster with `spring.batch.jdbc.initialize-schema=always`; the Liquibase-owned Spring Batch 6 schema copy with widened `EXIT_MESSAGE` is tracked in [docs/batch-metadata-a39b.md](docs/batch-metadata-a39b.md).
+- CockroachDB gotchas: no `make_interval` named args (use `INTERVAL` literals); SQLSTATE 40001 serialization retries are expected under contention.
+
+## Prerequisites
+
+- JDK for the Gradle toolchain: Java 25 (`build.gradle` pins `JavaLanguageVersion.of(25)`).
+- Gradle wrapper included (Gradle 9.5.1); no Docker and no database needed, tests are plain JUnit.
+
+## Quickstart
+
+A clean clone works with no `.env`: the library reads no configuration at all.
+
+```bash
+git clone https://github.com/sean-huni/dcre-platform-persistence.git
+cd dcre-platform-persistence
+./gradlew test publishToMavenLocal
 ```
-za.co.fnb.dcre:dcre-platform-persistence:0.1.0
+
+Consume from a service (`spring-boot-starter-data-jdbc` is `compileOnly` here, so the consumer must provide Spring Data JDBC itself):
+
+```groovy
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    implementation 'za.co.fnb.dcre:platform-persistence:0.1.0'
+}
 ```
 
-### How it was published
+Wire it in: annotate the application class with `@Import(za.co.fnb.dcre.platform.persistence.JdbcConfig.class)` and extend `BaseEntity` from each `data/model` aggregate.
 
-1. `build.gradle` applies `java-library` + `maven-publish`, sets
-   `group = 'za.co.fnb.dcre'` and `version = '0.1.0'`, and declares a single
-   `MavenPublication` from `components.java`. `withSourcesJar()` publishes a
-   sources jar alongside the binary jar.
-2. Publish to the local Maven repository (`~/.m2/repository`):
+## Configuration
 
-   ```bash
-   ./gradlew publishToMavenLocal
-   ```
+None. The library defines no properties and reads no environment variables; datasource, Liquibase and Batch-metadata configuration belong to the consuming service (12FactorApp Alignment - https://12factor.net/).
 
-3. This produces, under `~/.m2/repository/za/co/fnb/dcre/dcre-platform-persistence/0.1.0/`:
-   - `dcre-platform-persistence-0.1.0.jar` (classes)
-   - `dcre-platform-persistence-0.1.0-sources.jar`
-   - `dcre-platform-persistence-0.1.0.pom` (Maven metadata)
-   - `dcre-platform-persistence-0.1.0.module` (Gradle module metadata)
+## Testing
 
-There is currently no remote repository configured; distribution is Maven Local only.
-Every consuming project is built on the same machine, so `publishToMavenLocal` is the
-whole release step. When a shared artifact repository (e.g. Nexus/Artifactory) becomes
-available, add it under `publishing.repositories` and publish with `./gradlew publish`.
+```bash
+./gradlew test
+```
 
-### How to consume it from another project
+JUnit Jupiter (JUnit BOM 6.0.2), pure unit tests: no Docker, no database.
 
-1. Make sure the version you need exists locally (clone this repo at the matching
-   commit and run `./gradlew publishToMavenLocal` if it does not).
-2. In the consuming project's `build.gradle`, include `mavenLocal()` in the
-   repositories and add the dependency:
+## Fleet build step (in place of cluster deployment)
 
-   ```groovy
-   repositories {
-       mavenCentral()
-       mavenLocal()
-   }
+This library is never deployed to the kind cluster itself; it is baked into every stage-service image at build time. In the dev-environment quickstart it is step 2 (build platform libs before any service image):
 
-   dependencies {
-       implementation 'za.co.fnb.dcre:dcre-platform-persistence:0.1.0'
-   }
-   ```
+```bash
+./gradlew publishToMavenLocal
+```
 
-3. Note: `spring-boot-starter-data-jdbc` is declared `compileOnly` here, so the
-   consuming service must provide Spring Data JDBC itself (any Spring Boot 4 service
-   with the `spring-boot-starter-data-jdbc` starter already does).
+This produces, under `~/.m2/repository/za/co/fnb/dcre/platform-persistence/0.1.0/`, the binary jar, sources jar (`withSourcesJar()`), POM and Gradle module metadata. Distribution is Maven Local only (no remote repository configured); every consuming project builds on the same machine.
 
-### Releasing a new version
+Releasing a change: bump `version` in `build.gradle` (SemVer; released versions are immutable, any change means a new version), run the tests, `./gradlew publishToMavenLocal`, then bump the dependency version in consuming services. Fleet releases are digits-only 3-component SemVer git tags (no `v` prefix), uniform across the fleet; current release tag: 2.1.1.
 
-1. Bump `version` in `build.gradle` (SemVer; released versions are immutable, so any
-   change after a release means a new version, never a re-publish of the same one).
-2. Run the tests: `./gradlew test`.
-3. Publish: `./gradlew publishToMavenLocal`.
-4. Commit with the JIRA ticket in the title, then bump the dependency version in the
-   consuming projects.
+## Related repositories
 
-The sibling platform modules (`dcre-platform-model`, `dcre-platform-batch`,
-`dcre-platform-files`) follow the same publish/consume flow under the same
-`za.co.fnb.dcre` group.
+- https://github.com/sean-huni/dcre-agt (orchestrator, mints stage-service k8s Jobs)
+- https://github.com/sean-huni/dcre-crr
+- https://github.com/sean-huni/dcre-ctv
+- https://github.com/sean-huni/dcre-cde
+- https://github.com/sean-huni/dcre-cir
+- https://github.com/sean-huni/dcre-crw
+- https://github.com/sean-huni/dcre-ixr
+- https://github.com/sean-huni/dcre-sxr
+- https://github.com/sean-huni/dcre-pxr
+- https://github.com/sean-huni/dcre-prg
+- https://github.com/sean-huni/dcre-ais
+- https://github.com/sean-huni/dcre-hcs
+- https://github.com/sean-huni/dcre-platform-model
+- https://github.com/sean-huni/dcre-platform-files
+- https://github.com/sean-huni/dcre-platform-batch
+- https://github.com/sean-huni/dcre-infra
+- https://github.com/sean-huni/dcre-fixture-toolkit
+- https://github.com/sean-huni/dcre-design-register
+- https://github.com/sean-huni/dcre-rpt
