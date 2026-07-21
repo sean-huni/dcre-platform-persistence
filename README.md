@@ -17,7 +17,7 @@ Provides the persistence base shared by all DCRE stage services. `BaseEntity` gi
 
 - Liquibase pure-XML typed changelogs in calendar layout (`YYYY/MM`); single writer per table via grants.
 - v4 UUID PKs; wire/status codes persisted as text under CHECK constraints, never enum identity.
-- Batch metadata: every stage service shares one CockroachDB database (`dcre_collections`) and isolates its Spring Batch 6 tables with a per-service prefix (e.g. `CRR_BATCH_`), single-writer via grants (R-04). `spring.batch.jdbc.initialize-schema` stays `never`: the tables come from a Liquibase-owned copy of the Spring Batch DDL with `EXIT_MESSAGE` widened to `TEXT` (design register A-39b, resolved; see `crr`'s `002-batch-metadata.xml` for the reference implementation).
+- Batch metadata: every stage service shares one CockroachDB database (`dcre_col`) and isolates its Spring Batch 6 tables with a per-service prefix (e.g. `CRR_BATCH_`), single-writer via grants (R-04). `spring.batch.jdbc.initialize-schema` stays `never`: the tables come from a Liquibase-owned copy of the Spring Batch DDL with `EXIT_MESSAGE` widened to `TEXT` (design register A-39b, resolved; see `crr`'s `002-batch-metadata.xml` for the reference implementation).
 
 ## Prerequisites
 
