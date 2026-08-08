@@ -17,7 +17,7 @@ Provides the persistence base shared by all DCRE stage services. `BaseEntity` gi
 
 - Liquibase pure-XML typed changelogs in calendar layout (`YYYY/MM`); single writer per table via grants.
 - v4 UUID PKs; wire/status codes persisted as text under CHECK constraints, never enum identity.
-- Batch metadata: every stage service shares one CockroachDB database (`dcre_col`) and isolates its Spring Batch 6 tables with a per-service prefix (e.g. `CRR_BATCH_`), single-writer via grants (R-04). `spring.batch.jdbc.initialize-schema` stays `never`: the tables come from a Liquibase-owned copy of the Spring Batch DDL with `EXIT_MESSAGE` widened to `TEXT` (design register A-39b, resolved; see `crr`'s `002-batch-metadata.xml` for the reference implementation).
+- Batch metadata: each family's stage services share that family's CockroachDB database (`dcre_col`, `dcre_pay`, `dcre_man`) and isolate their Spring Batch 6 tables with a per-service prefix (e.g. `CRR_BATCH_`), single-writer via grants (R-04). `spring.batch.jdbc.initialize-schema` stays `never`: the tables come from a Liquibase-owned copy of the Spring Batch DDL with `EXIT_MESSAGE` widened to `TEXT` (design register A-39b, resolved; see `crr`'s `002-batch-metadata.xml` for the reference implementation).
 
 ## Prerequisites
 
@@ -81,11 +81,11 @@ Releasing a change: bump `version` in `build.gradle` (SemVer; released versions 
 - https://github.com/sean-huni/dcre-cde
 - https://github.com/sean-huni/dcre-cir
 - https://github.com/sean-huni/dcre-crw
-- https://github.com/sean-huni/dcre-ixr
-- https://github.com/sean-huni/dcre-sxr
-- https://github.com/sean-huni/dcre-pxr
-- https://github.com/sean-huni/dcre-prg
-- https://github.com/sean-huni/dcre-ais
+- https://github.com/sean-huni/dcre-cix
+- https://github.com/sean-huni/dcre-csx
+- https://github.com/sean-huni/dcre-cpx
+- https://github.com/sean-huni/dcre-crg
+- https://github.com/sean-huni/dcre-pai
 - https://github.com/sean-huni/dcre-hcs
 - https://github.com/sean-huni/dcre-platform-model
 - https://github.com/sean-huni/dcre-platform-files
